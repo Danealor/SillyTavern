@@ -2826,7 +2826,7 @@ async function sendGenerationRequest(generationType, prompt, additionalNegativeP
                 result = await generateOpenAiImage(prefixedPrompt, signal);
                 break;
             case sources.aimlapi:
-                result = await generateAimlapiImage(prefixedPrompt, signal);
+                result = await generateAimlapiImage(prefixedPrompt, signal, generationType);
                 break;
             case sources.comfy:
                 result = await generateComfyImage(prefixedPrompt, negativePrompt, signal);
@@ -3557,8 +3557,11 @@ function calculateImageSize(width, height) {
  * - Extracts the URL or base64 response.
  * - If it's a URL, fetches the image and converts to base64.
  * - Returns { format: 'png', data: '<base64 string>' }, ready for saveBase64AsFile().
+ * @param {string} prompt - The prompt for image generation
+ * @param {AbortSignal} signal - Signal to abort the request
+ * @param {number} generationType - The generation mode (from generationMode enum)
  */
-async function generateAimlapiImage(prompt, signal) {
+async function generateAimlapiImage(prompt, signal, generationType) {
     const model = extension_settings.sd.model.toLowerCase();
     const isGeminiEdit = model === 'google/gemini-2.5-flash-image-edit';
     const isSeedreamEdit = model === 'bytedance/seedream-v4-edit';
@@ -3574,28 +3577,37 @@ async function generateAimlapiImage(prompt, signal) {
     if (isGeminiEdit || isSeedreamEdit) {
         const imageUrls = [];
 
+        // Determine which avatars to include based on generation type
+        const includeBothAvatars = generationType === generationMode.SCENARIO || generationType === generationMode.NOW;
+        const includeCharAvatar = includeBothAvatars || generationType === generationMode.CHARACTER || generationType === generationMode.FACE;
+        const includeUserAvatar = includeBothAvatars || generationType === generationMode.USER;
+
         // Get user avatar
-        try {
-            const userAvatarResponse = await fetch(getUserAvatarUrl());
-            if (userAvatarResponse.ok) {
-                const avatarBlob = await userAvatarResponse.blob();
-                const avatarBase64DataUrl = await getBase64Async(avatarBlob);
-                imageUrls.push(avatarBase64DataUrl);
+        if (includeUserAvatar) {
+            try {
+                const userAvatarResponse = await fetch(getUserAvatarUrl());
+                if (userAvatarResponse.ok) {
+                    const avatarBlob = await userAvatarResponse.blob();
+                    const avatarBase64DataUrl = await getBase64Async(avatarBlob);
+                    imageUrls.push(avatarBase64DataUrl);
+                }
+            } catch (error) {
+                console.warn('Failed to fetch user avatar:', error);
             }
-        } catch (error) {
-            console.warn('Failed to fetch user avatar:', error);
         }
 
         // Get character avatar
-        try {
-            const charAvatarResponse = await fetch(getCharacterAvatarUrl());
-            if (charAvatarResponse.ok) {
-                const avatarBlob = await charAvatarResponse.blob();
-                const avatarBase64DataUrl = await getBase64Async(avatarBlob);
-                imageUrls.push(avatarBase64DataUrl);
+        if (includeCharAvatar) {
+            try {
+                const charAvatarResponse = await fetch(getCharacterAvatarUrl());
+                if (charAvatarResponse.ok) {
+                    const avatarBlob = await charAvatarResponse.blob();
+                    const avatarBase64DataUrl = await getBase64Async(avatarBlob);
+                    imageUrls.push(avatarBase64DataUrl);
+                }
+            } catch (error) {
+                console.warn('Failed to fetch character avatar:', error);
             }
-        } catch (error) {
-            console.warn('Failed to fetch character avatar:', error);
         }
 
         if (imageUrls.length > 0) {
