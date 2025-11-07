@@ -3492,7 +3492,7 @@ async function generateOpenAiImage(prompt, signal) {
  * Universal image generation via AIMLAPI:
  * - Builds the right request body for any model (OpenAI vs SD/Flux/Recraft).
  * - Extracts the URL or base64 response.
- * - If it’s a URL, fetches the image and converts to base64.
+ * - If it's a URL, fetches the image and converts to base64.
  * - Returns { format: 'png', data: '<base64 string>' }, ready for saveBase64AsFile().
  */
 async function generateAimlapiImage(prompt, signal) {
@@ -3504,6 +3504,41 @@ async function generateAimlapiImage(prompt, signal) {
         model === 'triposr';
 
     const body = { prompt, model };
+
+    // Add avatars for image editing models
+    const isImageEditModel = model.includes('edit') || model.includes('image-to-image');
+    if (isImageEditModel) {
+        const imageUrls = [];
+
+        // Get user avatar
+        try {
+            const userAvatarResponse = await fetch(getUserAvatarUrl());
+            if (userAvatarResponse.ok) {
+                const avatarBlob = await userAvatarResponse.blob();
+                const avatarBase64DataUrl = await getBase64Async(avatarBlob);
+                imageUrls.push(avatarBase64DataUrl);
+            }
+        } catch (error) {
+            console.warn('Failed to fetch user avatar:', error);
+        }
+
+        // Get character avatar
+        try {
+            const charAvatarResponse = await fetch(getCharacterAvatarUrl());
+            if (charAvatarResponse.ok) {
+                const avatarBlob = await charAvatarResponse.blob();
+                const avatarBase64DataUrl = await getBase64Async(avatarBlob);
+                imageUrls.push(avatarBase64DataUrl);
+            }
+        } catch (error) {
+            console.warn('Failed to fetch character avatar:', error);
+        }
+
+        if (imageUrls.length > 0) {
+            body.image_urls = imageUrls;
+        }
+    }
+
     if (isSdLike) {
         body.steps = clamp(extension_settings.sd.steps, 1, 50);
         body.guidance = clamp(extension_settings.sd.scale, 1.5, 5);
