@@ -3489,6 +3489,69 @@ async function generateOpenAiImage(prompt, signal) {
 }
 
 /**
+ * Calculates the closest aspect ratio for Gemini based on width and height.
+ * @param {number} width - Image width
+ * @param {number} height - Image height
+ * @returns {string} Aspect ratio string (e.g., "16:9", "1:1")
+ */
+function calculateAspectRatio(width, height) {
+    const ratio = width / height;
+    const aspectRatios = [
+        { name: '21:9', value: 21 / 9 },
+        { name: '16:9', value: 16 / 9 },
+        { name: '4:3', value: 4 / 3 },
+        { name: '5:4', value: 5 / 4 },
+        { name: '3:2', value: 3 / 2 },
+        { name: '1:1', value: 1 },
+        { name: '2:3', value: 2 / 3 },
+        { name: '3:4', value: 3 / 4 },
+        { name: '4:5', value: 4 / 5 },
+        { name: '9:16', value: 9 / 16 },
+    ];
+
+    let closest = aspectRatios[0];
+    let minDiff = Math.abs(ratio - closest.value);
+
+    for (const ar of aspectRatios) {
+        const diff = Math.abs(ratio - ar.value);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closest = ar;
+        }
+    }
+
+    return closest.name;
+}
+
+/**
+ * Calculates the closest image size for Seedream based on width and height.
+ * @param {number} width - Image width
+ * @param {number} height - Image height
+ * @returns {string} Image size string (e.g., "square_hd", "landscape_16_9")
+ */
+function calculateImageSize(width, height) {
+    const ratio = width / height;
+
+    if (Math.abs(ratio - 1) < 0.1) {
+        return width >= 1024 ? 'square_hd' : 'square';
+    } else if (ratio > 1) {
+        // Landscape
+        if (Math.abs(ratio - 16 / 9) < Math.abs(ratio - 4 / 3)) {
+            return 'landscape_16_9';
+        } else {
+            return 'landscape_4_3';
+        }
+    } else {
+        // Portrait
+        if (Math.abs(ratio - 9 / 16) < Math.abs(ratio - 3 / 4)) {
+            return 'portrait_16_9';
+        } else {
+            return 'portrait_4_3';
+        }
+    }
+}
+
+/**
  * Universal image generation via AIMLAPI:
  * - Builds the right request body for any model (OpenAI vs SD/Flux/Recraft).
  * - Extracts the URL or base64 response.
@@ -3497,6 +3560,8 @@ async function generateOpenAiImage(prompt, signal) {
  */
 async function generateAimlapiImage(prompt, signal) {
     const model = extension_settings.sd.model.toLowerCase();
+    const isGeminiEdit = model === 'google/gemini-2.5-flash-image-edit';
+    const isSeedreamEdit = model === 'bytedance/seedream-v4-edit';
     const isSdLike =
         model.startsWith('flux/') ||
         model.startsWith('stable') ||
@@ -3505,9 +3570,8 @@ async function generateAimlapiImage(prompt, signal) {
 
     const body = { prompt, model };
 
-    // Add avatars for image editing models
-    const isImageEditModel = model.includes('edit') || model.includes('image-to-image');
-    if (isImageEditModel) {
+    // Handle specialized image editing models
+    if (isGeminiEdit || isSeedreamEdit) {
         const imageUrls = [];
 
         // Get user avatar
@@ -3537,8 +3601,33 @@ async function generateAimlapiImage(prompt, signal) {
         if (imageUrls.length > 0) {
             body.image_urls = imageUrls;
         }
+
+        if (isGeminiEdit) {
+            // Gemini-specific parameters
+            body.aspect_ratio = calculateAspectRatio(extension_settings.sd.width, extension_settings.sd.height);
+            body.num_images = 1;
+        } else if (isSeedreamEdit) {
+            // Seedream-specific parameters
+            body.image_size = calculateImageSize(extension_settings.sd.width, extension_settings.sd.height);
+            body.num_images = 1;
+            body.enable_safety_checker = false;
+            body.sync_mode = true;
+            if (extension_settings.sd.seed >= 0) body.seed = extension_settings.sd.seed;
+        }
+
+        const res = await fetch('/v1/images/generations', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            signal,
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error(await res.text());
+
+        const { format, data } = await res.json();
+        return { format, data };
     }
 
+    // Standard model handling
     if (isSdLike) {
         body.steps = clamp(extension_settings.sd.steps, 1, 50);
         body.guidance = clamp(extension_settings.sd.scale, 1.5, 5);
