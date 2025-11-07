@@ -3615,7 +3615,7 @@ async function generateAimlapiImage(prompt, signal) {
             if (extension_settings.sd.seed >= 0) body.seed = extension_settings.sd.seed;
         }
 
-        const res = await fetch('/v1/images/generations', {
+        const res = await fetch('/api/sd/aimlapi/generate-image', {
             method: 'POST',
             headers: getRequestHeaders(),
             signal,
