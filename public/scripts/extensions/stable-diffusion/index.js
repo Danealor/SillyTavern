@@ -3713,7 +3713,7 @@ function calculateImageSize(width, height) {
 async function generateAimlapiImage(prompt, signal, generationType) {
     const model = extension_settings.sd.model.toLowerCase();
     // Match google/gemini-*-image-edit or google/nano-banana*-edit
-    const isGeminiEdit = /^google\/(gemini-.+-image-edit|nano-banana.*-edit)$/.test(model);
+    const isGeminiEdit = /^google\/(gemini-.+-image.*-edit|nano-banana.*-edit)$/.test(model);
     // Match bytedance/seedream-*-edit
     const isSeedreamEdit = /^bytedance\/seedream-.+-edit$/.test(model);
     const isSdLike =
