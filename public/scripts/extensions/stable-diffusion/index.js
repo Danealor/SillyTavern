@@ -3712,8 +3712,10 @@ function calculateImageSize(width, height) {
  */
 async function generateAimlapiImage(prompt, signal, generationType) {
     const model = extension_settings.sd.model.toLowerCase();
-    const isGeminiEdit = model === 'google/gemini-2.5-flash-image-edit';
-    const isSeedreamEdit = model === 'bytedance/seedream-v4-edit';
+    // Match google/gemini-*-image-edit or google/nano-banana*-edit
+    const isGeminiEdit = /^google\/(gemini-.+-image-edit|nano-banana.*-edit)$/.test(model);
+    // Match bytedance/seedream-*-edit
+    const isSeedreamEdit = /^bytedance\/seedream-.+-edit$/.test(model);
     const isSdLike =
         model.startsWith('flux/') ||
         model.startsWith('stable') ||
