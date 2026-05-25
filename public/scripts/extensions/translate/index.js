@@ -210,7 +210,7 @@ async function translateIncomingMessage(messageId) {
         return;
     }
 
-    const textToTranslate = substituteParams(message.mes, context.name1, message.name);
+    const textToTranslate = substituteParams(message.mes, { name2Override: message.name });
     const translation = await translate(textToTranslate, extension_settings.translate.target_language);
     message.extra.display_text = translation;
 
@@ -238,7 +238,7 @@ async function translateIncomingMessageReasoning(messageId) {
         return false;
     }
 
-    const textToTranslate = substituteParams(message.extra.reasoning, context.name1, message.name);
+    const textToTranslate = substituteParams(message.extra.reasoning, { name2Override: message.name });
     const translation = await translate(textToTranslate, extension_settings.translate.target_language);
     message.extra.reasoning_display_text = translation;
 
@@ -707,7 +707,7 @@ const handleMessageReasoningDelete = createEventHandler(removeReasoningDisplayTe
 
 globalThis.translate = translate;
 
-jQuery(async () => {
+export async function init() {
     const html = await renderExtensionTemplateAsync('translate', 'index');
     const buttonHtml = await renderExtensionTemplateAsync('translate', 'buttons');
 
@@ -801,4 +801,4 @@ jQuery(async () => {
         },
         returns: ARGUMENT_TYPE.STRING,
     }));
-});
+}

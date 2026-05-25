@@ -8,7 +8,7 @@ import { commonEnumProviders, enumIcons } from '../../slash-commands/SlashComman
 import { SlashCommandEnumValue, enumTypes } from '../../slash-commands/SlashCommandEnumValue.js';
 import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
 import { download, equalsIgnoreCaseAndAccents, escapeHtml, getFileText, getSortableDelay, isFalseBoolean, isTrueBoolean, regexFromString, setInfoBlock, uuidv4 } from '../../utils.js';
-import { allowPresetScripts, allowScopedScripts, disallowPresetScripts, disallowScopedScripts, getCurrentPresetAPI, getCurrentPresetName, getRegexScripts, getScriptsByType, isPresetScriptsAllowed, isScopedScriptsAllowed, regex_placement, runRegexScript, saveScriptsByType, SCRIPT_TYPE_UNKNOWN, SCRIPT_TYPES, substitute_find_regex } from './engine.js';
+import { allowPresetScripts, allowScopedScripts, disallowPresetScripts, disallowScopedScripts, getCurrentPresetAPI, getCurrentPresetName, getRegexScripts, getScriptsByType, isPresetScriptsAllowed, isScopedScriptsAllowed, regex_placement, RegexProvider, runRegexScript, saveScriptsByType, SCRIPT_TYPE_UNKNOWN, SCRIPT_TYPES, substitute_find_regex } from './engine.js';
 import { t } from '../../i18n.js';
 import { accountStorage } from '../../util/AccountStorage.js';
 import { getPresetManager } from '../../preset-manager.js';
@@ -1031,7 +1031,6 @@ function executeRegexScriptForDebugging(script, text) {
         const trailingText = text.substring(lastIndex);
         outputText += trailingText;
         highlightedOutput += escapeHtml(trailingText);
-
     } catch (e) {
         err = (err ? err + '; ' : '') + `Replace error: ${e.message}`;
         outputText = text; // Fallback
@@ -1628,6 +1627,8 @@ async function checkCharEmbeddedRegexScripts() {
         }
     }
 
+    // Clear cache and reload scripts
+    RegexProvider.instance.clear();
     await loadRegexScripts();
 }
 
@@ -1638,7 +1639,7 @@ async function checkCharEmbeddedRegexScripts() {
 function notifyReloadCurrentChat(presetName) {
     toastr.info(
         t`Reload the chat for regex to take effect` + '<br><u>' + t`Click here to reload immediately` + '</u>',
-        t`Preset '${presetName}' contains enabled regex scripts`,
+        t`Preset '${escapeHtml(presetName)}' contains enabled regex scripts`,
         {
             timeOut: 5000,
             escapeHtml: false,
@@ -1708,7 +1709,7 @@ function onPresetRenamed({ apiId, oldName, newName }) {
 
 // Workaround for loading in sequence with other extensions
 // NOTE: Always puts extension at the top of the list, but this is fine since it's static
-jQuery(async () => {
+export async function init() {
     if (!Array.isArray(extension_settings.regex)) {
         extension_settings.regex = [];
     }
@@ -2068,6 +2069,37 @@ jQuery(async () => {
         helpString: 'Runs a Regex extension script by name on the provided string. The script must be enabled.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'regex-state',
+        /** @param {object} _ @param {string} name */
+        callback: (_, name) => {
+            if (!name) {
+                toastr.warning('No regex script name provided.');
+                return '';
+            }
+
+            const scripts = getRegexScripts();
+            const script = scripts.find(s => equalsIgnoreCaseAndAccents(s.scriptName, name));
+
+            if (!script) {
+                toastr.warning(`Regex script "${name}" not found.`);
+                return '';
+            }
+
+            return script.disabled ? 'false' : 'true';
+        },
+        returns: 'true (for enabled) or false (for disabled)',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'script name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: true,
+                enumProvider: localEnumProviders.regexScripts,
+            }),
+        ],
+        helpString: 'Returns the current state of a regex script.',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'regex-toggle',
         callback: toggleRegexCallback,
         returns: 'The name of the script that was toggled',
@@ -2122,4 +2154,4 @@ jQuery(async () => {
 
     presetManager.setupEventListeners();
     presetManager.registerSlashCommands();
-});
+}

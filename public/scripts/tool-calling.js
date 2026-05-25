@@ -1,7 +1,7 @@
 import { DOMPurify } from '../lib.js';
 
-import { addOneMessage, chat, event_types, eventSource, main_api, saveChatConditional, system_avatar, systemUserName } from '../script.js';
-import { chat_completion_sources, custom_prompt_post_processing_types, model_list, oai_settings } from './openai.js';
+import { addOneMessage, chat, event_types, eventSource, getGeneratingApi, getGeneratingModel, main_api, saveChatConditional, system_avatar, systemUserName } from '../script.js';
+import { chat_completion_sources, custom_prompt_post_processing_types, getChatCompletionModel, model_list, oai_settings } from './openai.js';
 import { Popup } from './popup.js';
 import { SlashCommand } from './slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from './slash-commands/SlashCommandArgument.js';
@@ -19,11 +19,14 @@ import { isTrueBoolean } from './utils.js';
  * @property {string} name - The name of the tool.
  * @property {string} parameters - The parameters for the tool invocation.
  * @property {string} result - The result of the tool invocation.
+ * @property {string?} signature - The thought signature associated with the tool invocation.
+ * @property {string?} reasoning - The plaintext reasoning associated with this tool call turn.
+ * @property {boolean} [error] - Whether the tool invocation failed.
  */
 
 /**
  * @typedef {object} ToolInvocationResult
- * @property {ToolInvocation[]} invocations Successful tool invocations
+ * @property {ToolInvocation[]} invocations Tool invocations (both successful and failed)
  * @property {Error[]} errors Errors that occurred during tool invocation
  * @property {string[]} stealthCalls Names of stealth tools that were invoked
  */
@@ -334,10 +337,10 @@ export class ToolManager {
 
             if (error instanceof Error) {
                 error.cause = name;
-                return error.toString();
+                return error;
             }
 
-            return new Error('Unknown error occurred while invoking the tool.', { cause: name }).toString();
+            return new Error('Unknown error occurred while invoking the tool.', { cause: name });
         }
     }
 
@@ -409,8 +412,8 @@ export class ToolManager {
         if (tools.length) {
             console.log('[ToolManager] Registered function tools:', tools);
 
-            data['tools'] = tools;
-            data['tool_choice'] = 'auto';
+            data.tools = tools;
+            data.tool_choice = 'auto';
         }
     }
 
@@ -418,9 +421,10 @@ export class ToolManager {
      * Utility function to parse tool calls from a parsed response.
      * @param {any[]} toolCalls The tool calls to update.
      * @param {any} parsed The parsed response from the OpenAI API.
+     * @param {object} toolSignatures Optional mapping of tool call IDs to thought signatures.
      * @returns {void}
      */
-    static parseToolCalls(toolCalls, parsed) {
+    static parseToolCalls(toolCalls, parsed, toolSignatures = {}) {
         if (!this.isToolCallingSupported()) {
             return;
         }
@@ -457,6 +461,11 @@ export class ToolManager {
                     const targetToolCall = toolCalls[choiceIndex][toolCallIndex];
 
                     ToolManager.#applyToolCallDelta(targetToolCall, toolCallDelta);
+
+                    // Transfer thought signature if available
+                    if (Object.hasOwn(toolSignatures, targetToolCall.id)) {
+                        targetToolCall.signature = toolSignatures[targetToolCall.id];
+                    }
                 }
             }
         }
@@ -537,6 +546,9 @@ export class ToolManager {
                                 toolCalls[choiceIndex][toolCallIndex] = {};
                             }
                             const targetToolCall = toolCalls[choiceIndex][toolCallIndex];
+                            if (part.thoughtSignature) {
+                                targetToolCall.thoughtSignature = part.thoughtSignature;
+                            }
                             ToolManager.#applyToolCallDelta(targetToolCall, part.functionCall);
                         }
                     }
@@ -559,6 +571,10 @@ export class ToolManager {
             const targetValue = target[key];
 
             if (deltaValue === null || deltaValue === undefined) {
+                // Don't reset the value if it already exists
+                if (targetValue) {
+                    continue;
+                }
                 target[key] = deltaValue;
                 continue;
             }
@@ -585,59 +601,44 @@ export class ToolManager {
 
     /**
      * Checks if tool calling is supported for the current settings and generation type.
+     * @param {ChatCompletionSettings} settings Optional chat completion settings
+     * @param {string} model Optional model name
      * @returns {boolean} Whether tool calling is supported for the given type
      */
-    static isToolCallingSupported() {
-        if (main_api !== 'openai' || !oai_settings.function_calling) {
+    static isToolCallingSupported(settings = null, model = null) {
+        settings = settings ?? oai_settings;
+        model = model ?? getChatCompletionModel(settings);
+
+        if (main_api !== 'openai' || !settings.function_calling) {
             return false;
         }
 
         // Post-processing will forcefully remove past tool calls from the prompt, making them useless
         const { NONE, MERGE_TOOLS, SEMI_TOOLS, STRICT_TOOLS } = custom_prompt_post_processing_types;
         const allowedPromptPostProcessing = [NONE, MERGE_TOOLS, SEMI_TOOLS, STRICT_TOOLS];
-        if (!allowedPromptPostProcessing.includes(oai_settings.custom_prompt_post_processing)) {
+        if (!allowedPromptPostProcessing.includes(settings.custom_prompt_post_processing)) {
             return false;
         }
 
-        if (oai_settings.chat_completion_source === chat_completion_sources.POLLINATIONS && Array.isArray(model_list)) {
-            const currentModel = model_list.find(model => model.id === oai_settings.pollinations_model);
-            if (currentModel) {
-                return currentModel.tools;
-            }
-        }
-
-        if (oai_settings.chat_completion_source === chat_completion_sources.FIREWORKS && Array.isArray(model_list)) {
-            const currentModel = model_list.find(model => model.id === oai_settings.fireworks_model);
-            if (currentModel) {
-                return currentModel.supports_tools;
-            }
-        }
-
-        if (oai_settings.chat_completion_source === chat_completion_sources.OPENROUTER && Array.isArray(model_list)) {
-            const currentModel = model_list.find(model => model.id === oai_settings.openrouter_model);
-            if (Array.isArray(currentModel?.supported_parameters)) {
-                return currentModel.supported_parameters.includes('tools');
-            }
-        }
-
-        if (oai_settings.chat_completion_source === chat_completion_sources.MISTRALAI && Array.isArray(model_list)) {
-            const currentModel = model_list.find(model => model.id === oai_settings.mistralai_model);
-            if (currentModel && currentModel.capabilities) {
-                return currentModel.capabilities.function_calling;
-            }
-        }
-
-        if (oai_settings.chat_completion_source === chat_completion_sources.AIMLAPI && Array.isArray(model_list)) {
-            const currentModel = model_list.find(model => model.id === oai_settings.aimlapi_model);
-            if (Array.isArray(currentModel?.features)) {
-                return currentModel.features.includes('openai/chat-completion.function');
-            }
-        }
-
-        if (oai_settings.chat_completion_source === chat_completion_sources.ELECTRONHUB && Array.isArray(model_list)) {
-            const currentModel = model_list.find(model => model.id === oai_settings.electronhub_model);
-            if (currentModel && currentModel.metadata?.function_call) {
-                return currentModel.metadata.function_call;
+        const currentModel = Array.isArray(model_list) ? model_list.find(m => m.id === model) : null;
+        if (currentModel) {
+            switch (settings.chat_completion_source) {
+                case chat_completion_sources.POLLINATIONS:
+                    return currentModel.tools;
+                case chat_completion_sources.FIREWORKS:
+                    return currentModel.supports_tools;
+                case chat_completion_sources.OPENROUTER:
+                    return currentModel.supported_parameters?.includes('tools');
+                case chat_completion_sources.MISTRALAI:
+                    return currentModel.capabilities?.function_calling;
+                case chat_completion_sources.AIMLAPI:
+                    return currentModel.features?.includes('openai/chat-completion.function');
+                case chat_completion_sources.CHUTES:
+                    return currentModel.supported_features?.includes('tools');
+                case chat_completion_sources.ELECTRONHUB:
+                    return currentModel.metadata?.function_call;
+                case chat_completion_sources.WORKERS_AI:
+                    return Array.isArray(currentModel.properties) && currentModel.properties.some(p => p.property_id === 'function_calling' && p.value === 'true');
             }
         }
 
@@ -659,22 +660,30 @@ export class ToolManager {
             chat_completion_sources.MOONSHOT,
             chat_completion_sources.FIREWORKS,
             chat_completion_sources.COMETAPI,
+            chat_completion_sources.CHUTES,
             chat_completion_sources.ELECTRONHUB,
             chat_completion_sources.AZURE_OPENAI,
             chat_completion_sources.ZAI,
             chat_completion_sources.SILICONFLOW,
+            chat_completion_sources.NANOGPT,
+            chat_completion_sources.WORKERS_AI,
+            chat_completion_sources.MINIMAX,
         ];
-        return supportedSources.includes(oai_settings.chat_completion_source);
+        return supportedSources.includes(settings.chat_completion_source);
     }
 
     /**
      * Checks if tool calls can be performed for the current settings and generation type.
      * @param {string} type Generation type
+     * @param {ChatCompletionSettings} settings Optional chat completion settings
+     * @param {string} model Optional model name
      * @returns {boolean} Whether tool calls can be performed for the given type
      */
-    static canPerformToolCalls(type) {
+    static canPerformToolCalls(type, settings = null, model = null) {
+        settings = settings ?? oai_settings;
+        model = model ?? getChatCompletionModel(settings);
         const noToolCallTypes = ['impersonate', 'quiet', 'continue'];
-        const isSupported = ToolManager.isToolCallingSupported();
+        const isSupported = ToolManager.isToolCallingSupported(settings, model);
         return isSupported && !noToolCallTypes.includes(type);
     }
 
@@ -688,7 +697,7 @@ export class ToolManager {
         const isClaudeToolCall = c => Array.isArray(c) ? c.filter(x => x).every(isClaudeToolCall) : c?.input && c?.name && c?.id;
         const isGoogleToolCall = c => Array.isArray(c) ? c.filter(x => x).every(isGoogleToolCall) : c?.name && c?.args;
         const convertClaudeToolCall = c => ({ id: c.id, function: { name: c.name, arguments: c.input } });
-        const convertGoogleToolCall = (c) => ({ id: getRandomId(), function: { name: c.name, arguments: c.args } });
+        const convertGoogleToolCall = (c, signature = null) => ({ id: getRandomId(), function: { name: c.name, arguments: c.args }, signature });
 
         // Parsed tool calls from streaming data
         if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0])) {
@@ -697,7 +706,7 @@ export class ToolManager {
             }
 
             if (isGoogleToolCall(data[0])) {
-                return data[0].filter(x => x).map(convertGoogleToolCall);
+                return data[0].filter(x => x).map((c) => convertGoogleToolCall(c, c.thoughtSignature));
             }
 
             if (typeof data[0]?.[0]?.tool_calls === 'object') {
@@ -709,7 +718,7 @@ export class ToolManager {
 
         // Google AI Studio tool calls
         if (Array.isArray(data?.responseContent?.parts)) {
-            return data.responseContent.parts.filter(p => p.functionCall).map(p => convertGoogleToolCall(p.functionCall));
+            return data.responseContent.parts.filter(p => p.functionCall).map(p => convertGoogleToolCall(p.functionCall, p.thoughtSignature));
         }
 
         // Parsed tool calls from non-streaming data
@@ -717,7 +726,17 @@ export class ToolManager {
             // Find a choice with 0-index
             const choice = data.choices.find(choice => choice.index === 0);
 
-            if (choice) {
+            if (choice && typeof choice.message === 'object' && Array.isArray(choice.message.tool_calls)) {
+                // Add OpenRouter signatures
+                if (Array.isArray(choice.message.reasoning_details)) {
+                    for (const toolCall of choice.message.tool_calls) {
+                        const reasoningDetail = choice.message.reasoning_details.find(rd => rd.id === toolCall.id);
+                        if (reasoningDetail && reasoningDetail.type === 'reasoning.encrypted' && reasoningDetail.data) {
+                            toolCall.signature = reasoningDetail.data;
+                        }
+                    }
+                }
+
                 return choice.message.tool_calls;
             }
         }
@@ -752,7 +771,7 @@ export class ToolManager {
      * @param {any} data Reply data
      * @returns {Promise<ToolInvocationResult>} Successful tool invocations
      */
-    static async invokeFunctionTools(data) {
+    static async invokeFunctionTools(data, { reasoningText = null } = {}) {
         /** @type {ToolInvocationResult} */
         const result = {
             invocations: [],
@@ -782,9 +801,23 @@ export class ToolManager {
             toastr.clear(toast);
             console.log('[ToolManager] Function tool result:', result);
 
-            // Save a successful invocation
+            // Handle tool errors — still create an invocation so the LLM sees the failure
             if (toolResult instanceof Error) {
                 result.errors.push(toolResult);
+                if (isStealth) {
+                    result.stealthCalls.push(name);
+                } else {
+                    result.invocations.push({
+                        id,
+                        displayName,
+                        name,
+                        parameters: stringify(parameters),
+                        result: toolResult.toString(),
+                        error: true,
+                        signature: toolCall.signature || null,
+                        reasoning: reasoningText || null,
+                    });
+                }
                 continue;
             }
 
@@ -800,6 +833,9 @@ export class ToolManager {
                 name,
                 parameters: stringify(parameters),
                 result: toolResult,
+                error: false,
+                signature: toolCall.signature || null,
+                reasoning: reasoningText || null,
             };
             result.invocations.push(invocation);
         }
@@ -861,6 +897,8 @@ export class ToolManager {
             extra: {
                 isSmallSys: true,
                 tool_invocations: invocations,
+                api: getGeneratingApi(),
+                model: getGeneratingModel(),
             },
         };
         chat.push(message);

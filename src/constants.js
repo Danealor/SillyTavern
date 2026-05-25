@@ -196,6 +196,7 @@ export const CHAT_COMPLETION_SOURCES = {
     COHERE: 'cohere',
     PERPLEXITY: 'perplexity',
     GROQ: 'groq',
+    CHUTES: 'chutes',
     ELECTRONHUB: 'electronhub',
     NANOGPT: 'nanogpt',
     DEEPSEEK: 'deepseek',
@@ -208,6 +209,8 @@ export const CHAT_COMPLETION_SOURCES = {
     AZURE_OPENAI: 'azure_openai',
     ZAI: 'zai',
     SILICONFLOW: 'siliconflow',
+    MINIMAX: 'minimax',
+    WORKERS_AI: 'workers_ai',
 };
 
 /**
@@ -453,6 +456,8 @@ export const AZURE_OPENAI_KEYS = [
     'reasoning_effort',
 ];
 
+export const OPENAI_VERBOSITY_MODELS = /^gpt-5/;
+
 export const OPENAI_REASONING_EFFORT_MODELS = [
     'o1',
     'o3-mini',
@@ -470,10 +475,38 @@ export const OPENAI_REASONING_EFFORT_MODELS = [
     'gpt-5.1',
     'gpt-5.1-2025-11-13',
     'gpt-5.1-chat-latest',
+    'gpt-5.2',
+    'gpt-5.2-2025-12-11',
+    'gpt-5.2-chat-latest',
+    'gpt-5.3-chat-latest',
+    'gpt-5.4',
+    'gpt-5.4-2026-03-05',
+    'gpt-5.4-mini',
+    'gpt-5.4-mini-2026-03-17',
+    'gpt-5.4-nano',
+    'gpt-5.4-nano-2026-03-17',
+    'gpt-5.5',
+    'gpt-5.5-2026-04-23',
 ];
 
 export const OPENAI_REASONING_EFFORT_MAP = {
     min: 'minimal',
+};
+
+/**
+ * Models that only accept a single fixed reasoning effort value.
+ * @type {Record<string, string>}
+ */
+export const OPENAI_FIXED_REASONING_EFFORT = {
+    'gpt-5.3-chat-latest': 'medium',
+};
+
+export const NANOGPT_REASONING_EFFORT_MAP = {
+    min: 'none',
+    low: 'minimal',
+    medium: 'low',
+    high: 'medium',
+    max: 'high',
 };
 
 export const LOG_LEVELS = {
@@ -513,7 +546,27 @@ export const MEDIA_EXTENSIONS = [
     'aiff',
 ];
 
+/**
+ * Bitwise flag-style media request types.
+ */
+export const MEDIA_REQUEST_TYPE = {
+    IMAGE: 0b001,
+    VIDEO: 0b010,
+    AUDIO: 0b100,
+};
+
+
 export const ZAI_ENDPOINT = {
     COMMON: 'common',
     CODING: 'coding',
+};
+
+export const SILICONFLOW_ENDPOINT = {
+    GLOBAL: 'global',
+    CN: 'cn',
+};
+
+export const MINIMAX_ENDPOINT = {
+    GLOBAL: 'global',
+    CN: 'cn',
 };

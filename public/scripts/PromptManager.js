@@ -579,10 +579,6 @@ class PromptManager {
                 const sourceName = this.promptSources[promptId];
                 entrySource.textContent = sourceName;
             }
-
-            if (!this.systemPrompts.includes(promptId)) {
-                injectionPositionField.removeAttribute('disabled');
-            }
         };
 
         // Append prompt to selected character
@@ -769,7 +765,7 @@ class PromptManager {
         eventSource.on(event_types.CHATCOMPLETION_MODEL_CHANGED, () => this.renderDebounced());
 
         // Re-render when the character changes.
-        eventSource.on('chatLoaded', (event) => {
+        eventSource.on(event_types.CHAT_LOADED, (event) => {
             this.handleCharacterSelected(event);
             this.saveServiceSettings().then(() => this.renderDebounced());
         });
@@ -990,7 +986,6 @@ class PromptManager {
      * @returns {void}
      */
     addPrompt(prompt, identifier) {
-
         if (typeof prompt !== 'object' || prompt === null) throw new Error('Object is not a prompt');
 
         const newPrompt = {
@@ -1284,10 +1279,10 @@ class PromptManager {
         const preparedPrompt = new Prompt(prompt);
 
         if (typeof original === 'string') {
-            if (0 < groupMembers.length) preparedPrompt.content = substituteParams(prompt.content ?? '', null, null, original, groupMembers.join(', '));
-            else preparedPrompt.content = substituteParams(prompt.content, null, null, original);
+            if (0 < groupMembers.length) preparedPrompt.content = substituteParams(prompt.content ?? '', { original, groupOverride: groupMembers.join(', ') });
+            else preparedPrompt.content = substituteParams(prompt.content, { original });
         } else {
-            if (0 < groupMembers.length) preparedPrompt.content = substituteParams(prompt.content ?? '', null, null, null, groupMembers.join(', '));
+            if (0 < groupMembers.length) preparedPrompt.content = substituteParams(prompt.content ?? '', { groupOverride: groupMembers.join(', ') });
             else preparedPrompt.content = substituteParams(prompt.content);
         }
 
@@ -1305,7 +1300,7 @@ class PromptManager {
         const prompt = this.getPromptById(identifier);
         const textareaIdentifier = `${identifier}_prompt_quick_edit_textarea`;
         const html = `<div class="range-block m-t-1">
-                        <div class="justifyLeft" data-i18n="${title}">${title}</div>
+                        <div class="justifyLeft">${title}</div>
                         <div class="wide100p">
                             <textarea id="${textareaIdentifier}" class="text_pole textarea_compact" rows="6" placeholder="">${prompt.content}</textarea>
                         </div>
@@ -1322,7 +1317,6 @@ class PromptManager {
             this.updatePromptByIdentifier(identifier, prompt);
             debouncedSaveServiceSettings().then(() => this.render());
         });
-
     }
 
     /**
@@ -1397,10 +1391,6 @@ class PromptManager {
         if (isPulledPrompt) {
             const sourceName = this.promptSources[prompt.identifier];
             entrySource.textContent = sourceName;
-        }
-
-        if (this.systemPrompts.includes(prompt.identifier)) {
-            injectionPositionField.setAttribute('disabled', 'disabled');
         }
 
         const resetPromptButton = document.getElementById(this.configuration.prefix + 'prompt_manager_popup_entry_form_reset');
@@ -1757,7 +1747,7 @@ class PromptManager {
                         ${isInjectionPrompt ? '<span class="fa-fw fa-solid fa-syringe" title="In-Chat Injection"></span>' : ''}
                         ${this.isPromptInspectionAllowed(prompt) ? `<a title="${encodedName}" class="prompt-manager-inspect-action">${encodedName}</a>` : `<span title="${encodedName}">${encodedName}</span>`}
                         ${roleIcon ? `<span data-role="${escapeHtml(prompt.role)}" class="fa-xs fa-solid ${roleIcon}" title="${roleTitle}"></span>` : ''}
-                        ${isInjectionPrompt ? `<small class="prompt-manager-injection-depth">@ ${escapeHtml(prompt.injection_depth)}</small>` : ''}
+                        ${isInjectionPrompt ? `<small class="prompt-manager-injection-depth">@ ${escapeHtml(prompt.injection_depth.toString())}</small>` : ''}
                         ${isOverriddenPrompt ? '<small class="fa-solid fa-address-card prompt-manager-overridden" title="Pulled from a character card"></small>' : ''}
                     </span>
                     <span>

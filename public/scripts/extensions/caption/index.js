@@ -1,8 +1,9 @@
 import { ensureImageFormatSupported, getBase64Async, getFileExtension, isTrueBoolean, saveBase64AsFile } from '../../utils.js';
 import { getContext, getApiUrl, doExtrasFetch, extension_settings, modules, renderExtensionTemplateAsync } from '../../extensions.js';
-import { appendMediaToMessage, chat_metadata, eventSource, event_types, getRequestHeaders, saveChatConditional, saveSettingsDebounced, substituteParamsExtended } from '../../../script.js';
+import { appendMediaToMessage, chat_metadata, eventSource, event_types, getRequestHeaders, saveChatConditional, saveSettingsDebounced, substituteParams } from '../../../script.js';
 import { getMessageTimeStamp } from '../../RossAscends-mods.js';
 import { SECRET_KEYS, secret_state } from '../../secrets.js';
+import { oai_settings } from '../../openai.js';
 import { getMultimodalCaption } from '../shared.js';
 import { textgen_types, textgenerationwebui_settings } from '../../textgen-settings.js';
 import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
@@ -10,7 +11,7 @@ import { SlashCommand } from '../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
 import { commonEnumProviders } from '../../slash-commands/SlashCommandCommonEnumsProvider.js';
 import { callGenericPopup, Popup, POPUP_TYPE } from '../../popup.js';
-import { MEDIA_DISPLAY, MEDIA_SOURCE, MEDIA_TYPE, SCROLL_BEHAVIOR } from '../../constants.js';
+import { debounce_timeout, MEDIA_DISPLAY, MEDIA_SOURCE, MEDIA_TYPE, SCROLL_BEHAVIOR } from '../../constants.js';
 export { MODULE_NAME };
 
 const MODULE_NAME = 'caption';
@@ -68,8 +69,7 @@ async function setImageIcon() {
         const sendButton = $('#send_picture .extensionsMenuExtensionButton');
         sendButton.addClass('fa-image');
         sendButton.removeClass('fa-hourglass-half');
-    }
-    catch (error) {
+    } catch (error) {
         console.log(error);
     }
 }
@@ -82,8 +82,7 @@ async function setSpinnerIcon() {
         const sendButton = $('#send_picture .extensionsMenuExtensionButton');
         sendButton.removeClass('fa-image');
         sendButton.addClass('fa-hourglass-half');
-    }
-    catch (error) {
+    } catch (error) {
         console.log(error);
     }
 }
@@ -101,14 +100,14 @@ async function wrapCaptionTemplate(caption) {
         template += ' {{caption}}';
     }
 
-    let messageText = substituteParamsExtended(template, { caption: caption });
+    let messageText = substituteParams(template, { dynamicMacros: { caption: caption } });
 
     if (extension_settings.caption.refine_mode) {
         messageText = await Popup.show.input(
             'Review and edit the generated caption:',
             'Press "Cancel" to abort the caption sending.',
             messageText,
-            { rows: 5, okButton: 'Send' });
+            { rows: 8, okButton: 'Send' });
 
         if (!messageText) {
             throw new Error('User aborted the caption sending.');
@@ -204,13 +203,14 @@ async function sendCaptionedMessage(caption, image, mimeType) {
             inline_image: !!extension_settings.caption.show_in_chat,
         },
     };
-    chat_metadata['tainted'] = true;
+    chat_metadata.tainted = true;
     context.chat.push(message);
     const messageId = context.chat.length - 1;
     await eventSource.emit(event_types.MESSAGE_SENT, messageId);
     context.addOneMessage(message);
     await eventSource.emit(event_types.USER_MESSAGE_RENDERED, messageId);
     await context.saveChat();
+    setTimeout(() => context.scrollOnMediaLoad(), debounce_timeout.short);
 }
 
 /**
@@ -322,6 +322,8 @@ async function captionMultimodal(base64Img, externalPrompt) {
         prompt = String(customPrompt).trim();
     }
 
+    prompt = substituteParams(prompt);
+
     const caption = await getMultimodalCaption(base64Img, prompt);
     return { caption };
 }
@@ -375,14 +377,12 @@ async function getCaptionForFile(file, prompt, quiet) {
             await sendCaptionedMessage(caption, imagePath, file.type);
         }
         return caption;
-    }
-    catch (error) {
+    } catch (error) {
         const errorMessage = error.message || 'Unknown error';
         toastr.error(errorMessage, 'Failed to caption');
         console.error(error);
         return '';
-    }
-    finally {
+    } finally {
         setImageIcon();
     }
 }
@@ -454,10 +454,10 @@ function isVideoCaptioningAvailable() {
         return false;
     }
 
-    return ['google', 'vertexai'].includes(extension_settings.caption.multimodal_api);
+    return ['google', 'vertexai', 'zai'].includes(extension_settings.caption.multimodal_api);
 }
 
-jQuery(async function () {
+export async function init() {
     function addSendPictureButton() {
         const sendButton = $(`
         <div id="send_picture" class="list-group-item flex-container flexGap5">
@@ -488,6 +488,8 @@ jQuery(async function () {
                         'vertexai': SECRET_KEYS.VERTEXAI,
                         'anthropic': SECRET_KEYS.CLAUDE,
                         'xai': SECRET_KEYS.XAI,
+                        'zai': SECRET_KEYS.ZAI,
+                        'moonshot': SECRET_KEYS.MOONSHOT,
                     };
 
                     if (reverseProxyApis[api]) {
@@ -501,10 +503,11 @@ jQuery(async function () {
                         'groq': SECRET_KEYS.GROQ,
                         'cohere': SECRET_KEYS.COHERE,
                         'aimlapi': SECRET_KEYS.AIMLAPI,
-                        'moonshot': SECRET_KEYS.MOONSHOT,
                         'nanogpt': SECRET_KEYS.NANOGPT,
+                        'chutes': SECRET_KEYS.CHUTES,
                         'electronhub': SECRET_KEYS.ELECTRONHUB,
-                        'zai': SECRET_KEYS.ZAI,
+                        'pollinations': SECRET_KEYS.POLLINATIONS,
+                        'workers_ai': SECRET_KEYS.WORKERS_AI,
                     };
 
                     if (chatCompletionApis[api] && secret_state[chatCompletionApis[api]]) {
@@ -528,7 +531,7 @@ jQuery(async function () {
                     }
 
                     // Custom API doesn't need additional checks
-                    if (api === 'custom' || api === 'pollinations') {
+                    if (api === 'custom') {
                         return true;
                     }
                 }
@@ -581,7 +584,7 @@ jQuery(async function () {
     }
 
     async function addRemoteEndpointModels() {
-        async function processEndpoint(api, url) {
+        async function processEndpoint(api, url, additionalParams = {}) {
             const dropdown = document.getElementById('caption_multimodal_model');
             if (!(dropdown instanceof HTMLSelectElement)) {
                 return;
@@ -593,6 +596,7 @@ jQuery(async function () {
             const response = await fetch(url, {
                 method: 'POST',
                 headers: getRequestHeaders(),
+                body: JSON.stringify(additionalParams),
             });
             if (!response.ok) {
                 return;
@@ -600,7 +604,7 @@ jQuery(async function () {
             const modelIds = await response.json();
             if (Array.isArray(modelIds) && modelIds.length > 0) {
                 modelIds.sort().forEach((modelId) => {
-                    if (!modelId || typeof modelId !== 'string' || options.some(o => o.value === modelId)) {
+                    if (!modelId || typeof modelId !== 'string' || options.some(o => o.value === modelId && o.dataset.type === api)) {
                         return;
                     }
                     const option = document.createElement('option');
@@ -616,9 +620,12 @@ jQuery(async function () {
         await processEndpoint('aimlapi', '/api/backends/chat-completions/multimodal-models/aimlapi');
         await processEndpoint('pollinations', '/api/backends/chat-completions/multimodal-models/pollinations');
         await processEndpoint('nanogpt', '/api/backends/chat-completions/multimodal-models/nanogpt');
+        await processEndpoint('chutes', '/api/backends/chat-completions/multimodal-models/chutes');
         await processEndpoint('electronhub', '/api/backends/chat-completions/multimodal-models/electronhub');
         await processEndpoint('mistral', '/api/backends/chat-completions/multimodal-models/mistral');
         await processEndpoint('xai', '/api/backends/chat-completions/multimodal-models/xai');
+        await processEndpoint('moonshot', '/api/backends/chat-completions/multimodal-models/moonshot');
+        await processEndpoint('workers_ai', '/api/backends/chat-completions/multimodal-models/workers_ai', { workers_ai_account_id: oai_settings.workers_ai_account_id });
     }
 
     await addSettings();
@@ -694,6 +701,10 @@ jQuery(async function () {
     });
     $('#caption_ollama_custom_model').val(extension_settings.caption.ollama_custom_model || '').on('input', () => {
         extension_settings.caption.ollama_custom_model = String($('#caption_ollama_custom_model').val()).trim();
+        saveSettingsDebounced();
+    });
+    $('#caption_custom_model').val(extension_settings.caption.custom_model || '').on('input', () => {
+        extension_settings.caption.custom_model = String($('#caption_custom_model').val()).trim();
         saveSettingsDebounced();
     });
     $('#caption_refresh_models').on('click', async () => {
@@ -799,4 +810,4 @@ jQuery(async function () {
     }));
 
     document.body.classList.add('caption');
-});
+}

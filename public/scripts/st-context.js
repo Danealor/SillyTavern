@@ -53,27 +53,38 @@ import {
     swipe_right,
     swipe_left,
     generateRaw,
+    generateRawData,
     showSwipeButtons,
     hideSwipeButtons,
     deleteMessage,
     refreshSwipeButtons,
+    swipe,
     isSwipingAllowed,
+    swipeState,
     ensureMessageMediaIsArray,
     getMediaDisplay,
     getMediaIndex,
+    scrollChatToBottom,
+    scrollOnMediaLoad,
+    getOneCharacter,
+    getCharacterSource,
 } from '../script.js';
 import {
     extension_settings,
+    getExtensionManifest,
     ModuleWorkerWrapper,
     openThirdPartyExtensionMenu,
     renderExtensionTemplate,
     renderExtensionTemplateAsync,
     saveMetadataDebounced,
+    UNSET_VALUE,
     writeExtensionField,
+    writeExtensionFieldBulk,
 } from './extensions.js';
 import { groups, openGroupChat, selected_group, unshallowGroupMembers } from './group-chats.js';
 import { addLocaleData, getCurrentLocale, t, translate } from './i18n.js';
 import { hideLoader, showLoader } from './loader.js';
+import { loader } from './action-loader.js';
 import { MacrosParser } from './macros.js';
 import { getChatCompletionModel, oai_settings } from './openai.js';
 import { callGenericPopup, Popup, POPUP_RESULT, POPUP_TYPE } from './popup.js';
@@ -84,19 +95,21 @@ import { ScraperManager } from './scrapers.js';
 import { executeSlashCommands, executeSlashCommandsWithOptions, registerSlashCommand } from './slash-commands.js';
 import { SlashCommand } from './slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from './slash-commands/SlashCommandArgument.js';
+import { SlashCommandEnumValue } from './slash-commands/SlashCommandEnumValue.js';
 import { SlashCommandParser } from './slash-commands/SlashCommandParser.js';
-import { tag_map, tags } from './tags.js';
+import { tag_map, tags, importTags } from './tags.js';
 import { getTextGenServer, textgenerationwebui_settings } from './textgen-settings.js';
 import { tokenizers, getTextTokens, getTokenCount, getTokenCountAsync, getTokenizerModel } from './tokenizers.js';
 import { ToolManager } from './tool-calling.js';
 import { accountStorage } from './util/AccountStorage.js';
-import { timestampToMoment, uuidv4 } from './utils.js';
-import { getGlobalVariable, getLocalVariable, setGlobalVariable, setLocalVariable } from './variables.js';
-import { convertCharacterBook, getWorldInfoPrompt, loadWorldInfo, reloadEditor, saveWorldInfo, updateWorldInfoList } from './world-info.js';
+import { timestampToMoment, uuidv4, importFromExternalUrl } from './utils.js';
+import { addGlobalVariable, addLocalVariable, decrementGlobalVariable, decrementLocalVariable, deleteGlobalVariable, deleteLocalVariable, existsGlobalVariable, existsLocalVariable, getGlobalVariable, getLocalVariable, incrementGlobalVariable, incrementLocalVariable, setGlobalVariable, setLocalVariable } from './variables.js';
+import { convertCharacterBook, getWorldInfoPrompt, loadWorldInfo, reloadEditor, saveWorldInfo, updateWorldInfoList, world_names } from './world-info.js';
 import { ChatCompletionService, TextCompletionService } from './custom-request.js';
 import { ConnectionManagerRequestService } from './extensions/shared.js';
-import { updateReasoningUI, parseReasoningFromString } from './reasoning.js';
+import { updateReasoningUI, parseReasoningFromString, getReasoningTemplateByName } from './reasoning.js';
 import { IGNORE_SYMBOL } from './constants.js';
+import { macros } from './macros/macro-system.js';
 
 export function getContext() {
     return {
@@ -152,6 +165,7 @@ export function getContext() {
         SlashCommand,
         SlashCommandArgument,
         SlashCommandNamedArgument,
+        SlashCommandEnumValue,
         ARGUMENT_TYPE,
         executeSlashCommandsWithOptions,
         /** @deprecated Use SlashCommandParser.addCommandObject() instead */
@@ -161,7 +175,9 @@ export function getContext() {
         timestampToMoment,
         /** @deprecated Handlebars for extensions are no longer supported. */
         registerHelper: () => { },
+        /** @deprecated Use `macros.register(name, { handler, description })` from scripts/macros/macro-system.js instead. */
         registerMacro: MacrosParser.registerMacro.bind(MacrosParser),
+        /** @deprecated Use `macros.registry.unregisterMacro(name)` from scripts/macros/macro-system.js instead. */
         unregisterMacro: MacrosParser.unregisterMacro.bind(MacrosParser),
         registerFunctionTool: ToolManager.registerFunctionTool.bind(ToolManager),
         unregisterFunctionTool: ToolManager.unregisterFunctionTool.bind(ToolManager),
@@ -176,7 +192,9 @@ export function getContext() {
         /** @deprecated Use callGenericPopup or Popup instead. */
         callPopup,
         callGenericPopup,
+        /** @deprecated Use loader.show instead. */
         showLoader,
+        /** @deprecated Use loader.hide instead. */
         hideLoader,
         mainApi: main_api,
         extensionSettings: extension_settings,
@@ -184,7 +202,9 @@ export function getContext() {
         getTokenizerModel,
         generateQuietPrompt,
         generateRaw,
+        generateRawData,
         writeExtensionField,
+        writeExtensionFieldBulk,
         getThumbnailUrl,
         selectCharacterById,
         messageFormatting,
@@ -207,7 +227,11 @@ export function getContext() {
         textCompletionSettings: textgenerationwebui_settings,
         powerUserSettings: power_user,
         getCharacters,
+        getOneCharacter,
         getCharacterCardFields,
+        getCharacterSource,
+        importFromExternalUrl,
+        importTags,
         uuidv4,
         humanizedDateTime,
         updateMessageBlock,
@@ -215,22 +239,38 @@ export function getContext() {
         ensureMessageMediaIsArray,
         getMediaDisplay,
         getMediaIndex,
+        scrollChatToBottom,
+        scrollOnMediaLoad,
+        macros,
+        loader,
         swipe: {
             left: swipe_left,
             right: swipe_right,
+            to: swipe,
             show: showSwipeButtons,
             hide: hideSwipeButtons,
             refresh: refreshSwipeButtons,
-            isAllowed: () => isSwipingAllowed,
+            isAllowed: isSwipingAllowed,
+            state: () => swipeState,
         },
         variables: {
             local: {
                 get: getLocalVariable,
                 set: setLocalVariable,
+                del: deleteLocalVariable,
+                add: addLocalVariable,
+                inc: incrementLocalVariable,
+                dec: decrementLocalVariable,
+                has: existsLocalVariable,
             },
             global: {
                 get: getGlobalVariable,
                 set: setGlobalVariable,
+                del: deleteGlobalVariable,
+                add: addGlobalVariable,
+                inc: incrementGlobalVariable,
+                dec: decrementGlobalVariable,
+                has: existsGlobalVariable,
             },
         },
         loadWorldInfo,
@@ -239,6 +279,7 @@ export function getContext() {
         updateWorldInfoList,
         convertCharacterBook,
         getWorldInfoPrompt,
+        getWorldInfoNames: () => Array.isArray(world_names) ? [...world_names] : [],
         CONNECT_API_MAP,
         getTextGenServer,
         extractMessageFromData,
@@ -251,11 +292,16 @@ export function getContext() {
         ConnectionManagerRequestService,
         updateReasoningUI,
         parseReasoningFromString,
+        getReasoningTemplateByName,
         unshallowCharacter,
         unshallowGroupMembers,
+        getExtensionManifest,
         openThirdPartyExtensionMenu,
         symbols: {
             ignore: IGNORE_SYMBOL,
+        },
+        constants: {
+            unset: UNSET_VALUE,
         },
     };
 }
