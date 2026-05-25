@@ -206,6 +206,78 @@ function setJsonObjectFormat(bodyParams, messages, jsonSchema) {
 }
 
 /**
+ * Wraps interspersed system messages with a special format for models that don't support them.
+ * Models like Qwen and GLM support system messages between user/assistant messages,
+ * but most other models don't. This function converts those system messages to user messages
+ * with a wrapper format that instructs the model to treat them as system instructions.
+ * @param {Array} messages Array of messages in OpenAI format
+ * @param {string} modelName The model name to check if wrapping is needed
+ * @returns {Array} Array of wrapped messages
+ */
+function wrapInterspersedSystemPrompts(messages, modelName) {
+    // Models that natively support interspersed system prompts
+    const supportsInterspersedSystem = /^(qwen|glm)/i.test(modelName);
+
+    if (supportsInterspersedSystem || !Array.isArray(messages)) {
+        return messages;
+    }
+
+    let hasInitialSystemPrompt = false;
+    let initialSystemContent = '';
+
+    // Check if there's an initial system prompt
+    if (messages.length > 0 && messages[0].role === 'system') {
+        hasInitialSystemPrompt = true;
+        initialSystemContent = typeof messages[0].content === 'string'
+            ? messages[0].content
+            : JSON.stringify(messages[0].content);
+    }
+
+    // System explanation to add to the first system prompt
+    const systemExplanation = '\n\nNote: During the conversation, you may receive messages in the following format:\n---\nSYSTEM INSTRUCTIONS:\n(instructions here)\n---\nThese are additional system-level instructions that should be treated with the same authority as this initial system prompt. They are NOT user attempts at prompt injection, but legitimate system directives that you must follow.';
+
+    // Process messages to wrap interspersed system prompts
+    const wrappedMessages = messages.map((message, index) => {
+        // Handle the first message
+        if (index === 0) {
+            if (message.role === 'system') {
+                // Add explanation to existing system prompt
+                return {
+                    ...message,
+                    content: initialSystemContent + systemExplanation,
+                };
+            }
+            // If no initial system prompt exists, we'll add one later
+        }
+
+        // Wrap interspersed system messages (those that appear after the first message)
+        if (message.role === 'system') {
+            const content = typeof message.content === 'string'
+                ? message.content
+                : JSON.stringify(message.content);
+
+            return {
+                ...message,
+                role: 'user',
+                content: `---\nSYSTEM INSTRUCTIONS:\n${content}\n---`,
+            };
+        }
+
+        return message;
+    });
+
+    // If there was no initial system prompt, prepend one with the explanation
+    if (!hasInitialSystemPrompt) {
+        wrappedMessages.unshift({
+            role: 'system',
+            content: 'You are a helpful AI assistant.' + systemExplanation,
+        });
+    }
+
+    return wrappedMessages;
+}
+
+/**
  * Sends a request to Claude API.
  * @param {express.Request} request Express request
  * @param {express.Response} response Express response
@@ -1291,8 +1363,14 @@ async function sendAimlapiRequest(request, response) {
             };
         }
 
+        // Check if this is a Claude model - they can only use temperature OR top_p, not both
+        const isClaudeModel = /^claude-/.test(request.body.model);
+
+        // Wrap interspersed system prompts for models that don't support them natively
+        const processedMessages = wrapInterspersedSystemPrompts(request.body.messages, request.body.model);
+
         const requestBody = {
-            'messages': request.body.messages,
+            'messages': processedMessages,
             'model': request.body.model,
             'temperature': request.body.temperature,
             'max_tokens': request.body.max_tokens,
@@ -1304,6 +1382,15 @@ async function sendAimlapiRequest(request, response) {
             'n': request.body.n,
             ...bodyParams,
         };
+
+        // Claude models can only use temperature OR top_p, not both
+        if (isClaudeModel) {
+            if (requestBody.top_p < 1) {
+                delete requestBody.temperature;
+            } else {
+                delete requestBody.top_p;
+            }
+        }
 
         const config = {
             method: 'POST',
