@@ -152,6 +152,46 @@ describe('calculateClaudeBudgetTokens', () => {
 });
 
 
+describe('getClaudeModelCapabilities', () => {
+    describe('claude-sonnet-5', () => {
+        const caps = () => mod.getClaudeModelCapabilities('claude-sonnet-5', true);
+        test('supports adaptive thinking regardless of config', () => {
+            expect(mod.getClaudeModelCapabilities('claude-sonnet-5', false).isAdaptiveModel).toBe(true);
+            expect(mod.getClaudeModelCapabilities('claude-sonnet-5', true).isAdaptiveModel).toBe(true);
+        });
+        test('rejects all sampling params', () => expect(caps().noSamplingModel).toBe(true));
+        test('is not limited-sampling (that path only drops one param)', () => expect(caps().isLimitedSampling).toBe(false));
+        test('rejects assistant prefill', () => expect(caps().noPrefillModel).toBe(true));
+        test('supports thinking, web search, and verbosity', () => {
+            const c = caps();
+            expect(c.useThinking).toBe(true);
+            expect(c.supportsWebSearch).toBe(true);
+            expect(c.useVerbosity).toBe(true);
+        });
+    });
+
+    describe('regression: sonnet-5 regex must not catch sonnet-4-x, and 4-x behavior is unchanged', () => {
+        test('claude-sonnet-4-6 keeps limited-sampling, not no-sampling', () => {
+            const c = mod.getClaudeModelCapabilities('claude-sonnet-4-6', true);
+            expect(c.isLimitedSampling).toBe(true);
+            expect(c.noSamplingModel).toBe(false);
+            expect(c.isAdaptiveModel).toBe(true); // only when config enabled
+            expect(mod.getClaudeModelCapabilities('claude-sonnet-4-6', false).isAdaptiveModel).toBe(false);
+        });
+        test('claude-sonnet-4-5 is limited-sampling, not no-sampling', () => {
+            const c = mod.getClaudeModelCapabilities('claude-sonnet-4-5', true);
+            expect(c.isLimitedSampling).toBe(true);
+            expect(c.noSamplingModel).toBe(false);
+        });
+        test('claude-opus-4-7 stays always-adaptive and no-sampling', () => {
+            const c = mod.getClaudeModelCapabilities('claude-opus-4-7', false);
+            expect(c.isAdaptiveModel).toBe(true);
+            expect(c.noSamplingModel).toBe(true);
+        });
+    });
+});
+
+
 describe('calculateGoogleBudgetTokens', () => {
     test('returns null for unrecognized model', () => {
         expect(mod.calculateGoogleBudgetTokens(8192, 'medium', 'gpt-4')).toBeNull();
