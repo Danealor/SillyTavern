@@ -1109,6 +1109,33 @@ export function cachingSystemPromptForOpenRouter(messages, ttl = undefined) {
 }
 
 /**
+ * Determines Claude model capability flags used to shape the outgoing Anthropic request.
+ * Each flag reflects a per-model API constraint or feature so the request stays valid:
+ * - useThinking: model supports a `thinking` block (adaptive effort or numeric budget).
+ * - supportsWebSearch: model supports the server-side web_search tool (still gated by the request flag).
+ * - isLimitedSampling: model accepts only one of temperature/top_p; the other must be dropped.
+ * - noSamplingModel: model rejects all sampling params (temperature/top_p/top_k) with a 400.
+ * - useVerbosity: model supports the output_config.effort ("verbosity") control.
+ * - noPrefillModel: model rejects assistant-message prefill with a 400.
+ * - isAdaptiveModel: model uses adaptive thinking (effort string) rather than a numeric budget.
+ *   Sonnet 5 and Opus 4.7 are always adaptive; Opus 4.6 / Sonnet 4.6 are adaptive only when enabled in config.
+ * @param {string} model Claude model id
+ * @param {boolean} enableAdaptiveThinking Whether adaptive thinking is enabled in config
+ * @returns {{useThinking: boolean, supportsWebSearch: boolean, isLimitedSampling: boolean, noSamplingModel: boolean, useVerbosity: boolean, noPrefillModel: boolean, isAdaptiveModel: boolean}}
+ */
+export function getClaudeModelCapabilities(model, enableAdaptiveThinking) {
+    return {
+        useThinking: /^claude-(3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6|opus-4-7|sonnet-5)/.test(model),
+        supportsWebSearch: /^claude-(3-5|3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6|opus-4-7|sonnet-5)/.test(model),
+        isLimitedSampling: /^claude-(opus-4-1|sonnet-4-5|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6)/.test(model),
+        noSamplingModel: /^claude-(opus-4-7|sonnet-5)/.test(model),
+        useVerbosity: /^claude-(opus-4-5|opus-4-6|sonnet-4-6|opus-4-7|sonnet-5)/.test(model),
+        noPrefillModel: /^claude-(opus-4-6|sonnet-4-6|opus-4-7|sonnet-5)/.test(model),
+        isAdaptiveModel: /^claude-(opus-4-7|sonnet-5)/.test(model) || (enableAdaptiveThinking && /^claude-(opus-4-6|sonnet-4-6)/.test(model)),
+    };
+}
+
+/**
  * Calculate the Claude budget tokens for a given reasoning effort.
  * Returns a string effort level for adaptive thinking (Opus 4.6+), a number for traditional thinking, or null for auto.
  * @param {number} maxTokens Maximum tokens
