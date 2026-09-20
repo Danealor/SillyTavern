@@ -189,6 +189,45 @@ describe('getClaudeModelCapabilities', () => {
             expect(c.noSamplingModel).toBe(true);
         });
     });
+
+    describe('upstream Claude 5 / Fable / Opus 4.8 models', () => {
+        test('claude-opus-5 behaves like sonnet-5', () => {
+            const c = mod.getClaudeModelCapabilities('claude-opus-5', false);
+            expect(c.isClaude5Model).toBe(true);
+            expect(c.isFableModel).toBe(false);
+            expect(c.isAdaptiveModel).toBe(true);
+            expect(c.noSamplingModel).toBe(true);
+            expect(c.noPrefillModel).toBe(true);
+            expect(c.useThinking).toBe(true);
+            expect(c.supportsWebSearch).toBe(true);
+            expect(c.useVerbosity).toBe(true);
+        });
+        test('claude-fable-5 is fable but not fable-5-1', () => {
+            const c = mod.getClaudeModelCapabilities('claude-fable-5', false);
+            expect(c.isFableModel).toBe(true);
+            expect(c.isFable51Model).toBe(false);
+            expect(c.isAdaptiveModel).toBe(true);
+            expect(c.noSamplingModel).toBe(true);
+            expect(c.noPrefillModel).toBe(true);
+        });
+        test('claude-fable-5-1 sets both fable flags', () => {
+            const c = mod.getClaudeModelCapabilities('claude-fable-5-1', false);
+            expect(c.isFableModel).toBe(true);
+            expect(c.isFable51Model).toBe(true);
+        });
+        test('proxy-prefixed ids still match fable/claude-5 (unanchored)', () => {
+            expect(mod.getClaudeModelCapabilities('anthropic/claude-fable-5', false).isFableModel).toBe(true);
+            expect(mod.getClaudeModelCapabilities('anthropic/claude-opus-5', false).isClaude5Model).toBe(true);
+        });
+        test('claude-opus-4-8 is always-adaptive, no-sampling, no-prefill, verbosity', () => {
+            const c = mod.getClaudeModelCapabilities('claude-opus-4-8', false);
+            expect(c.isAdaptiveModel).toBe(true);
+            expect(c.noSamplingModel).toBe(true);
+            expect(c.noPrefillModel).toBe(true);
+            expect(c.useVerbosity).toBe(true);
+            expect(c.isClaude5Model).toBe(false);
+        });
+    });
 });
 
 
@@ -204,6 +243,40 @@ describe('calculateGoogleBudgetTokens', () => {
         test('medium returns medium', () => expect(mod.calculateGoogleBudgetTokens(8192, 'medium', 'gemini-3.5-flash')).toBe('medium'));
         test('high returns high', () => expect(mod.calculateGoogleBudgetTokens(8192, 'high', 'gemini-3.5-flash')).toBe('high'));
         test('max returns high', () => expect(mod.calculateGoogleBudgetTokens(8192, 'max', 'gemini-3.5-flash')).toBe('high'));
+    });
+
+    test('Gemini 3.7 Flash uses Gemini 3 thinking levels without minimal', () => {
+        expect(mod.calculateGoogleBudgetTokens(8192, 'auto', 'gemini-3.7-flash')).toBeNull();
+        expect(mod.calculateGoogleBudgetTokens(8192, 'min', 'gemini-3.7-flash')).toBe('low');
+        expect(mod.calculateGoogleBudgetTokens(8192, 'medium', 'gemini-3.7-flash')).toBe('medium');
+        expect(mod.calculateGoogleBudgetTokens(8192, 'max', 'gemini-3.7-flash')).toBe('high');
+    });
+
+    test('Gemini 3.6 Flash uses Gemini 3 thinking levels', () => {
+        expect(mod.calculateGoogleBudgetTokens(8192, 'auto', 'gemini-3.6-flash')).toBeNull();
+        expect(mod.calculateGoogleBudgetTokens(8192, 'min', 'gemini-3.6-flash')).toBe('minimal');
+        expect(mod.calculateGoogleBudgetTokens(8192, 'medium', 'gemini-3.6-flash')).toBe('medium');
+        expect(mod.calculateGoogleBudgetTokens(8192, 'max', 'gemini-3.6-flash')).toBe('high');
+    });
+
+    test('Gemini 3.5 Flash-Lite uses Gemini 3 thinking levels', () => {
+        expect(mod.calculateGoogleBudgetTokens(8192, 'auto', 'gemini-3.5-flash-lite')).toBeNull();
+        expect(mod.calculateGoogleBudgetTokens(8192, 'min', 'gemini-3.5-flash-lite')).toBe('minimal');
+        expect(mod.calculateGoogleBudgetTokens(8192, 'medium', 'gemini-3.5-flash-lite')).toBe('medium');
+        expect(mod.calculateGoogleBudgetTokens(8192, 'max', 'gemini-3.5-flash-lite')).toBe('high');
+    });
+
+    test('stable Gemini 3.1 Flash-Lite uses Gemini 3 thinking levels', () => {
+        expect(mod.calculateGoogleBudgetTokens(8192, 'min', 'gemini-3.1-flash-lite')).toBe('minimal');
+        expect(mod.calculateGoogleBudgetTokens(8192, 'medium', 'gemini-3.1-flash-lite')).toBe('medium');
+        expect(mod.calculateGoogleBudgetTokens(8192, 'max', 'gemini-3.1-flash-lite')).toBe('high');
+    });
+
+    test('stable Gemini 3 image models use Gemini 3 thinking levels', () => {
+        expect(mod.calculateGoogleBudgetTokens(8192, 'min', 'gemini-3.1-flash-image')).toBe('minimal');
+        expect(mod.calculateGoogleBudgetTokens(8192, 'max', 'gemini-3.1-flash-image')).toBe('high');
+        expect(mod.calculateGoogleBudgetTokens(8192, 'min', 'gemini-3-pro-image')).toBe('low');
+        expect(mod.calculateGoogleBudgetTokens(8192, 'max', 'gemini-3-pro-image')).toBe('high');
     });
 
     describe('gemini-3 pro', () => {
@@ -1066,6 +1139,29 @@ describe('convertGooglePrompt', () => {
         ];
         const result = mod.convertGooglePrompt(messages, 'gemini-2.0-flash', false, names);
         expect(result.contents.filter(c => c.role === 'user')).toHaveLength(1);
+    });
+
+    for (const model of ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']) {
+        test(`merges a trailing prefill into the user turn on ${model}`, () => {
+            const messages = [
+                { role: 'user', content: 'Hi' },
+                { role: 'assistant', content: 'Prefill' },
+            ];
+            const result = mod.convertGooglePrompt(messages, model, false, names);
+            expect(result.contents).toHaveLength(1);
+            expect(result.contents[0].role).toBe('user');
+            expect(result.contents[0].parts[0].text).toBe('Hi\n\nPrefill');
+        });
+    }
+
+    test('keeps non-trailing model turns on models without prefill support', () => {
+        const messages = [
+            { role: 'user', content: 'Hi' },
+            { role: 'assistant', content: 'Hello' },
+            { role: 'user', content: 'How are you?' },
+        ];
+        const result = mod.convertGooglePrompt(messages, 'gemini-3.6-flash', false, names);
+        expect(result.contents.map(c => c.role)).toEqual(['user', 'model', 'user']);
     });
 
     test('converts image_url to inlineData', () => {

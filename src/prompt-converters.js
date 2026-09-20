@@ -453,13 +453,17 @@ export function convertGooglePrompt(messages, model, useSysPrompt, names) {
     const system_instruction = { parts: sysPrompt.map(text => ({ text })) };
     const toolNameMap = {};
 
+    // https://ai.google.dev/gemini-api/docs/latest-model#prefilled-model-turn-validation
+    const noPrefillModel = /gemini-3\.[67]-flash|gemini-3\.5-flash-lite/.test(model);
+
     const contents = [];
     messages.forEach((message, index) => {
         // fix the roles
         if (message.role === 'system' || message.role === 'tool') {
             message.role = 'user';
         } else if (message.role === 'assistant') {
-            message.role = 'model';
+            // A trailing model turn is a prefill, which is rejected by the newest models
+            message.role = noPrefillModel && index === messages.length - 1 ? 'user' : 'model';
         }
 
         // Convert the content to an array of parts
@@ -1124,14 +1128,21 @@ export function cachingSystemPromptForOpenRouter(messages, ttl = undefined) {
  * @returns {{useThinking: boolean, supportsWebSearch: boolean, isLimitedSampling: boolean, noSamplingModel: boolean, useVerbosity: boolean, noPrefillModel: boolean, isAdaptiveModel: boolean}}
  */
 export function getClaudeModelCapabilities(model, enableAdaptiveThinking) {
+    // Unanchored to also match prefixed ids passed through proxies, e.g. 'anthropic/claude-fable-5'
+    const isFableModel = /claude-fable/.test(model);
+    const isFable51Model = /claude-fable-5-1/.test(model);
+    const isClaude5Model = /claude-(opus-5|sonnet-5)/.test(model);
     return {
-        useThinking: /^claude-(3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6|opus-4-7|sonnet-5)/.test(model),
-        supportsWebSearch: /^claude-(3-5|3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6|opus-4-7|sonnet-5)/.test(model),
+        isFableModel,
+        isFable51Model,
+        isClaude5Model,
+        useThinking: /^claude-(3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6|opus-4-7)/.test(model) || isFableModel || isClaude5Model,
+        supportsWebSearch: /^claude-(3-5|3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6|opus-4-7)/.test(model) || isFableModel || isClaude5Model,
         isLimitedSampling: /^claude-(opus-4-1|sonnet-4-5|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6)/.test(model),
-        noSamplingModel: /^claude-(opus-4-7|sonnet-5)/.test(model),
-        useVerbosity: /^claude-(opus-4-5|opus-4-6|sonnet-4-6|opus-4-7|sonnet-5)/.test(model),
-        noPrefillModel: /^claude-(opus-4-6|sonnet-4-6|opus-4-7|sonnet-5)/.test(model),
-        isAdaptiveModel: /^claude-(opus-4-7|sonnet-5)/.test(model) || (enableAdaptiveThinking && /^claude-(opus-4-6|sonnet-4-6)/.test(model)),
+        noSamplingModel: /^claude-(opus-4-7|opus-4-8)/.test(model) || isFableModel || isClaude5Model,
+        useVerbosity: /^claude-(opus-4-5|opus-4-6|sonnet-4-6|opus-4-7|opus-4-8)/.test(model) || isFableModel || isClaude5Model,
+        noPrefillModel: /^claude-(opus-4-6|sonnet-4-6|opus-4-7|opus-4-8)/.test(model) || isFableModel || isClaude5Model,
+        isAdaptiveModel: /^claude-(opus-4-7|opus-4-8)/.test(model) || isFableModel || isClaude5Model || (enableAdaptiveThinking && /^claude-(opus-4-6|sonnet-4-6)/.test(model)),
     };
 }
 
@@ -1286,11 +1297,13 @@ export function calculateGoogleBudgetTokens(maxTokens, reasoningEffort, model) {
     }
 
     function getGemini3FlashBudget() {
+        // https://ai.google.dev/gemini-api/docs/models/gemini-3.7-flash
+        const noMinimalThinking = /gemini-3\.7-flash/.test(model);
         switch (reasoningEffort) {
             case REASONING_EFFORT.auto:
                 return null;
             case REASONING_EFFORT.min:
-                return 'minimal';
+                return noMinimalThinking ? 'low' : 'minimal';
             case REASONING_EFFORT.low:
                 return 'low';
             case REASONING_EFFORT.medium:
