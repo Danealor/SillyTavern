@@ -429,9 +429,71 @@ router.post('/generate-native-tts', async (request, response) => {
     }
 });
 
+/**
+ * Generates an image with a Gemini native image model (Nano Banana) via generateContent.
+ * @param {express.Request} request Express request object
+ * @param {express.Response} response Express response object
+ * @param {string} model Model name to use
+ */
+async function generateGeminiImage(request, response, model) {
+    const { url, headers, apiName, safetySettings } = await getGoogleApiConfig(request, model, 'generateContent');
+
+    const imageConfig = {};
+    if (request.body.aspect_ratio) {
+        imageConfig.aspectRatio = String(request.body.aspect_ratio);
+    }
+    // Only Gemini 3+ image models accept an output resolution.
+    if (request.body.image_size && /^gemini-3/.test(model)) {
+        imageConfig.imageSize = String(request.body.image_size);
+    }
+
+    const requestBody = {
+        contents: [{ role: 'user', parts: [{ text: request.body.prompt || '' }] }],
+        generationConfig: {
+            responseModalities: ['text', 'image'],
+            seed: request.body.seed !== undefined ? Number(request.body.seed) : undefined,
+            imageConfig: Object.keys(imageConfig).length ? imageConfig : undefined,
+        },
+        safetySettings: safetySettings,
+    };
+
+    console.debug(`${apiName} image generation request:`, model, requestBody);
+
+    const result = await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(requestBody),
+    });
+
+    if (!result.ok) {
+        const errorText = await result.text();
+        console.warn(`${apiName} image generation error: ${result.status} ${result.statusText}`, errorText);
+        return response.status(500).send('Image generation request failed');
+    }
+
+    /** @type {any} */
+    const data = await result.json();
+    const parts = data?.candidates?.[0]?.content?.parts ?? [];
+    const imagePart = parts.find(part => part.inlineData?.data)?.inlineData;
+
+    if (!imagePart) {
+        console.warn(`${apiName} image generation error: No image data found in response`);
+        return response.status(500).send('No image data found in response');
+    }
+
+    const format = imagePart.mimeType === 'image/jpeg' ? 'jpg' : 'png';
+    return response.send({ image: imagePart.data, format: format });
+}
+
 router.post('/generate-image', async (request, response) => {
     try {
         const model = request.body.model || 'imagen-3.0-generate-002';
+
+        // Gemini native image models use generateContent rather than the Imagen predict API.
+        if (/^gemini-.*-image/.test(model)) {
+            return await generateGeminiImage(request, response, model);
+        }
+
         const { url, headers, apiName } = await getGoogleApiConfig(request, model, 'predict');
 
         // AI Studio is stricter than Vertex AI.

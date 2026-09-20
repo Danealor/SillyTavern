@@ -360,6 +360,7 @@ const defaultSettings = {
     google_api: 'makersuite',
     google_enhance: true,
     google_duration: 6,
+    google_image_size: '',
 };
 
 const writePromptFieldsDebounced = debounce(writePromptFields, debounce_timeout.relaxed);
@@ -560,6 +561,7 @@ async function loadSettings() {
     $('#sd_google_api').val(extension_settings.sd.google_api);
     $('#sd_google_enhance').prop('checked', extension_settings.sd.google_enhance);
     $('#sd_google_duration').val(extension_settings.sd.google_duration);
+    $('#sd_google_image_size').val(extension_settings.sd.google_image_size);
 
     for (const style of extension_settings.sd.styles) {
         const option = document.createElement('option');
@@ -2491,6 +2493,10 @@ async function loadNovelModels() {
 
 async function loadGoogleModels() {
     return [
+        'gemini-3.1-flash-image',
+        'gemini-3.1-flash-lite-image',
+        'gemini-3-pro-image',
+        'gemini-2.5-flash-image',
         'imagen-4.0-generate-001',
         'imagen-4.0-ultra-generate-001',
         'imagen-4.0-fast-generate-001',
@@ -4756,6 +4762,7 @@ async function generateGoogleImage(prompt, negativePrompt, signal) {
             negative_prompt: negativePrompt,
             model: extension_settings.sd.model,
             enhance: extension_settings.sd.google_enhance,
+            image_size: extension_settings.sd.google_image_size || undefined,
             api: extension_settings.sd.google_api || 'makersuite',
             seed: extension_settings.sd.seed >= 0 ? extension_settings.sd.seed : undefined,
             vertexai_auth_mode: oai_settings.vertexai_auth_mode,
@@ -4766,7 +4773,7 @@ async function generateGoogleImage(prompt, negativePrompt, signal) {
 
     if (result.ok) {
         const data = await result.json();
-        return { format: 'jpg', data: data.image };
+        return { format: data.format || 'jpg', data: data.image };
     } else {
         const text = await result.text();
         throw new Error(text);
@@ -6037,6 +6044,10 @@ export async function init() {
     });
     $('#sd_google_duration').on('input', function () {
         extension_settings.sd.google_duration = Number($(this).val());
+        saveSettingsDebounced();
+    });
+    $('#sd_google_image_size').on('change', function () {
+        extension_settings.sd.google_image_size = String($(this).val());
         saveSettingsDebounced();
     });
     $('#sd_models_refresh').on('click', async () => {
