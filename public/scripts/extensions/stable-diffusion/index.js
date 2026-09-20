@@ -2382,6 +2382,8 @@ async function loadDrawthingsModels() {
 
 async function loadOpenAiModels() {
     return [
+        { value: 'gpt-image-2.5-sunburst', text: 'gpt-image-2.5-sunburst' },
+        { value: 'gpt-image-2.5-flare', text: 'gpt-image-2.5-flare' },
         { value: 'gpt-image-2', text: 'gpt-image-2' },
         { value: 'gpt-image-2-2026-04-21', text: 'gpt-image-2-2026-04-21' },
         { value: 'gpt-image-1.5', text: 'gpt-image-1.5' },
@@ -4078,7 +4080,13 @@ async function generateOpenAiImage(prompt, signal) {
     const isDalle2 = /dall-e-2/.test(extension_settings.sd.model);
     const isDalle3 = /dall-e-3/.test(extension_settings.sd.model);
     const isGptImg = /gpt-image-(1|2|latest)/.test(extension_settings.sd.model);
+    const isGptImg25 = /gpt-image-2\.5/.test(extension_settings.sd.model);
     const isSora2 = /sora-2/.test(extension_settings.sd.model);
+
+    // The xhigh/max quality tiers are only accepted by gpt-image-2.5; fall back to high for older models.
+    const gptImgQuality = !isGptImg25 && ['xhigh', 'max'].includes(extension_settings.sd.openai_quality_gpt)
+        ? 'high'
+        : extension_settings.sd.openai_quality_gpt;
 
     if (isDalle2 && prompt.length > dalle2PromptLimit) {
         prompt = prompt.substring(0, dalle2PromptLimit);
@@ -4150,7 +4158,7 @@ async function generateOpenAiImage(prompt, signal) {
             model: extension_settings.sd.model,
             size: `${width}x${height}`,
             n: 1,
-            quality: isDalle3 ? extension_settings.sd.openai_quality : (isGptImg ? extension_settings.sd.openai_quality_gpt : undefined),
+            quality: isDalle3 ? extension_settings.sd.openai_quality : (isGptImg ? gptImgQuality : undefined),
             style: isDalle3 ? extension_settings.sd.openai_style : undefined,
             response_format: isDalle2 || isDalle3 ? 'b64_json' : undefined,
             moderation: isGptImg ? 'low' : undefined,
